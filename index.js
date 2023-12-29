@@ -1,9 +1,10 @@
 import https from 'https';
-import JSONbig from 'json-bigint';
 import fs from 'fs/promises';
 import fsSync from 'fs';
 import dotenv from 'dotenv';
 import prettyBytes from 'pretty-bytes';
+import cliProgress from 'cli-progress';
+import colors from 'ansi-colors';
 import { exit } from 'process';
 
 dotenv.config();
@@ -11,7 +12,9 @@ dotenv.config();
 const localDir = process.env.LOCAL_DIR;
 const remoteDir = process.env.REMOTE_DIR;
 
-await backupPendingFiles();
+// await backupPendingFiles();
+// await upload('test.rar');
+await uploadWithProgressBar('backupfile.txt');
 
 async function backupPendingFiles() {
     logMessage(`Figuring out pending files...`);
@@ -102,7 +105,68 @@ async function getLocalBackupFiles() {
     }
 }
 
-async function upload(filename) {
+async function uploadWithProgressBar(filename) {
+    // Create the progress bar:
+    const progressBar = new cliProgress.SingleBar({
+        format:
+            'CLI Progress |' +
+            colors.cyan('{bar}') +
+            '| {percentage}% || {valuePretty}/{totalPretty} || Speed: {speed}',
+        barCompleteChar: '\u2588',
+        barIncompleteChar: '\u2591',
+        hideCursor: true,
+    });
+
+    const onStart = async () => {
+        // initialize the bar - defining payload token "speed" with the default value "N/A"
+        const filePath = `${localDir}/${filename}`;
+        const size = (await fs.stat(filePath)).size;
+
+        progressBar.start(size, 0, {
+            speed: 'N/A',
+            valuePretty: '0 B',
+            totalPretty: prettyBytes(size),
+        });
+    };
+
+    let startTime = new Date();
+    let startOffset = 0;
+    const onPreUpload = async offset => {
+        startTime = new Date();
+        startOffset = offset;
+    };
+
+    const onPostUpload = async offset => {
+        // Compute speed
+        const endTime = new Date();
+        const elapsed = (endTime - startTime) / 1000;
+        const speed = (offset - startOffset) / elapsed;
+
+        // update values
+        progressBar.increment();
+        progressBar.update(offset, {
+            valuePretty: prettyBytes(offset),
+            speed: prettyBytes(speed) + '/s',
+        });
+    };
+
+    const onEnd = async () => {
+        // stop the bar
+        progressBar.stop();
+    };
+
+    return upload(filename, {
+        onStart,
+        onPreUpload,
+        onPostUpload,
+        onEnd,
+    });
+}
+
+async function upload(
+    filename,
+    { onStart = null, onPreUpload = null, onPostUpload = null, onEnd = null }
+) {
     return new Promise((resolve, _) => {
         const baseUrl =
             'https://content.dropboxapi.com/2/files/upload_session/';
@@ -122,21 +186,27 @@ async function upload(filename) {
                 },
             },
             res => {
-                res.on('data', d => {
+                res.on('data', async d => {
                     const json = JSON.parse(d.toString('utf8'));
                     const session_id = json.session_id;
-                    let offset = BigInt(0);
+                    let offset = 0;
 
                     const stream = fsSync.createReadStream(filePath);
-                    stream.on('data', chunk => {
+
+                    if (onStart) await onStart();
+
+                    stream.on('data', async chunk => {
                         stream.pause();
+
+                        if (onPreUpload) await onPreUpload(offset);
+
                         const reqAppend = https.request(
                             `${baseUrl}/append_v2`,
                             {
                                 method: 'POST',
                                 headers: {
                                     'Authorization': `Bearer ${process.env.TOKEN}`,
-                                    'Dropbox-API-Arg': JSONbig.stringify({
+                                    'Dropbox-API-Arg': JSON.stringify({
                                         'cursor': {
                                             'session_id': session_id,
                                             'offset': offset,
@@ -146,7 +216,9 @@ async function upload(filename) {
                                     'Content-Type': 'application/octet-stream',
                                 },
                             },
-                            _ => {
+                            async _ => {
+                                if (onPostUpload) await onPostUpload(offset);
+
                                 stream.resume();
                             }
                         );
@@ -154,7 +226,7 @@ async function upload(filename) {
                         reqAppend.write(chunk);
                         reqAppend.end();
 
-                        offset += BigInt(chunk.length);
+                        offset += chunk.length;
                     });
 
                     stream.on('end', () => {
@@ -167,9 +239,7 @@ async function upload(filename) {
                                     'Dropbox-API-Arg': JSON.stringify({
                                         'cursor': {
                                             'session_id': session_id,
-                                            'offset': parseInt(
-                                                offset.toString()
-                                            ),
+                                            'offset': offset,
                                         },
                                         'commit': {
                                             'path': `${remoteDir}/${filename}`,
@@ -182,7 +252,9 @@ async function upload(filename) {
                                     'Content-Type': 'application/octet-stream',
                                 },
                             },
-                            res => {
+                            async res => {
+                                if (onEnd) await onEnd();
+
                                 if (res.statusCode !== 200) {
                                     logMessage(
                                         'statusCode: ',
