@@ -29,20 +29,22 @@ async function backupPendingFiles() {
 
     logMessage(`Found ${pendingFiles.length} pending files.`);
 
-    for (let idx = 0; idx < pendingFiles.length; idx++) {
-        const pendingFile = pendingFiles[idx];
-        const fileSize = prettyBytes(
-            (await fs.stat(`${localDir}/${pendingFile}`)).size
-        );
+    // for (let idx = 0; idx < pendingFiles.length; idx++) {
+    //     const pendingFile = pendingFiles[idx];
+    //     const fileSize = prettyBytes(
+    //         (await fs.stat(`${localDir}/${pendingFile}`)).size
+    //     );
 
-        logMessage(
-            `Uploading (${idx + 1}/${
-                pendingFiles.length
-            }) ${pendingFile} (size: ${fileSize})...`
-        );
+    //     logMessage(
+    //         `Uploading (${idx + 1}/${
+    //             pendingFiles.length
+    //         }) ${pendingFile} (size: ${fileSize})...`
+    //     );
 
-        await upload(pendingFile);
-    }
+    //     await upload(pendingFile);
+    // }
+
+    multiUploadWithProgressBar(pendingFiles);
 
     logMessage('Done.');
 }
