@@ -3,6 +3,7 @@ import JSONbig from 'json-bigint';
 import fs from 'fs/promises';
 import fsSync from 'fs';
 import dotenv from 'dotenv';
+import prettyBytes from 'pretty-bytes';
 import { exit } from 'process';
 
 dotenv.config();
@@ -20,9 +21,14 @@ async function backupPendingFiles() {
 
     for (let idx = 0; idx < pendingFiles.length; idx++) {
         const pendingFile = pendingFiles[idx];
+        const fileSize = prettyBytes(
+            (await fs.stat(`${localDir}/${pendingFile}`)).size
+        );
 
         logMessage(
-            `Uploading ${pendingFile} (${idx + 1}/${pendingFiles.length})...`
+            `Uploading (${idx + 1}/${
+                pendingFiles.length
+            }) ${pendingFile} (size: ${fileSize})...`
         );
 
         await upload(pendingFile);
