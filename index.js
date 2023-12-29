@@ -13,15 +13,15 @@ const localDir = process.env.LOCAL_DIR;
 const remoteDir = process.env.REMOTE_DIR;
 const accessToken = await getAccessToken();
 
-await backupPendingFiles();
+// await backupPendingFiles();
 // await upload('backupfile.txt');
 // await uploadWithProgressBar('backupfile.txt');
 // await multiUpload(['backupfile.txt', 'backupfile2.txt']);
-// await multiUploadWithProgressBar([
-//     'backupfile.txt',
-//     'backupfile2.txt',
-//     // 'test.rar',
-// ]);
+await multiUploadWithProgressBar([
+    'backupfile.txt',
+    'backupfile2.txt',
+    'test.rar',
+]);
 
 async function backupPendingFiles() {
     logMessage(`Figuring out pending files...`);
@@ -196,6 +196,10 @@ async function uploadWithProgressBar(filename, bar = null) {
 
     const onEnd = async () => {
         // stop the bar
+        bar.increment();
+        bar.update(bar.total, {
+            valuePretty: prettyBytes(bar.total),
+        });
         bar.stop();
     };
 
@@ -243,7 +247,9 @@ async function upload(
                     const session_id = json.session_id;
                     let offset = 0;
 
-                    const stream = fsSync.createReadStream(filePath);
+                    const stream = fsSync.createReadStream(filePath, {
+                        highWaterMark: 20 * 1024 * 1024,
+                    });
 
                     stream.on('data', async chunk => {
                         stream.pause();
