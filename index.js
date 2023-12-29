@@ -13,15 +13,15 @@ const localDir = process.env.LOCAL_DIR;
 const remoteDir = process.env.REMOTE_DIR;
 const accessToken = await getAccessToken();
 
-// await backupPendingFiles();
+await backupPendingFiles();
 // await upload('backupfile.txt');
 // await uploadWithProgressBar('backupfile.txt');
 // await multiUpload(['backupfile.txt', 'backupfile2.txt']);
-await multiUploadWithProgressBar([
-    'backupfile.txt',
-    'backupfile2.txt',
-    // 'test.rar',
-]);
+// await multiUploadWithProgressBar([
+//     'backupfile.txt',
+//     'backupfile2.txt',
+//     // 'test.rar',
+// ]);
 
 async function backupPendingFiles() {
     logMessage(`Figuring out pending files...`);
