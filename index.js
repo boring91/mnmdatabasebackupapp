@@ -20,7 +20,7 @@ await backupPendingFiles();
 // await multiUploadWithProgressBar([
 //     'backupfile.txt',
 //     'backupfile2.txt',
-//     'test.rar',
+//     'backupfile3.txt',
 // ]);
 
 async function backupPendingFiles() {
@@ -126,27 +126,27 @@ async function multiUploadWithProgressBar(filenames) {
         cliProgress.Presets.shades_grey
     );
 
-    const filenameToBar = {};
-
-    for (let i = 0; i < filenames.length; i++) {
-        const filename = filenames[i];
+    async function createPromise(filename) {
         const filePath = `${localDir}/${filename}`;
-        const size = (await fs.stat(filePath)).size;
-
+        const stats = await fs.stat(filePath);
+        const size = stats.size;
         const bar = multibar.create(size, 0, {
             filename,
             valuePretty: prettyBytes(0),
             totalPretty: prettyBytes(size),
             speed: prettyBytes(0) + '/s',
         });
-        filenameToBar[filename] = bar;
+        await uploadWithProgressBar(filename, bar);
+        multibar.log(
+            formatLogMessage(`Finished uploading ${filename}.`) + '\n'
+        );
+        multibar.remove(bar);
     }
 
-    await Promise.all(
-        filenames.map(x => {
-            return uploadWithProgressBar(x, filenameToBar[x]);
-        })
-    );
+    const promiseGenerators = filenames.map(x => createPromise.bind(null, x));
+    const maxConcurrentUploads = 5;
+
+    await batch(promiseGenerators, maxConcurrentUploads);
 
     multibar.stop();
 }
@@ -190,16 +190,12 @@ async function uploadWithProgressBar(filename, bar = null) {
         bar.increment();
         bar.update(offset, {
             valuePretty: prettyBytes(offset),
-            speed: prettyBytes(speed) + '/s',
+            speed: prettyBytes(speed || 0) + '/s',
         });
     };
 
     const onEnd = async () => {
         // stop the bar
-        bar.increment();
-        bar.update(bar.total, {
-            valuePretty: prettyBytes(bar.total),
-        });
         bar.stop();
     };
 
@@ -211,8 +207,8 @@ async function uploadWithProgressBar(filename, bar = null) {
 }
 
 async function multiUpload(filenames) {
-    const promises = filenames.map(x => upload(x));
-    await Promise.all(promises);
+    const promiseGenerators = filenames.map(x => upload.bind(null, x));
+    await batch(promiseGenerators, 5);
 }
 
 async function upload(
@@ -248,13 +244,11 @@ async function upload(
                     let offset = 0;
 
                     const stream = fsSync.createReadStream(filePath, {
-                        highWaterMark: 20 * 1024 * 1024,
+                        highWaterMark: 5 * 1024 * 1024,
                     });
 
                     stream.on('data', async chunk => {
                         stream.pause();
-
-                        if (onPreUpload) await onPreUpload(offset);
 
                         const reqAppend = https.request(
                             `${baseUrl}/append_v2`,
@@ -280,12 +274,14 @@ async function upload(
                         );
 
                         reqAppend.write(chunk);
+
+                        if (onPreUpload) await onPreUpload(offset);
                         reqAppend.end();
 
                         offset += chunk.length;
                     });
 
-                    stream.on('end', () => {
+                    stream.on('end', async () => {
                         const reqFinish = https.request(
                             `${baseUrl}/finish`,
                             {
@@ -309,7 +305,7 @@ async function upload(
                                 },
                             },
                             async res => {
-                                if (onEnd) onEnd();
+                                if (onEnd) await onEnd();
 
                                 if (res.statusCode !== 200) {
                                     logMessage(
@@ -326,6 +322,7 @@ async function upload(
                             }
                         );
 
+                        if (onPostUpload) await onPostUpload(offset);
                         reqFinish.end();
                     });
                 });
@@ -350,7 +347,6 @@ async function getAccessToken() {
                 },
             },
             res => {
-                console.log;
                 if (res.statusCode !== 200) {
                     logMessage('statusCode: ' + res.statusCode, true);
                     res.on('data', chunk => {
@@ -382,10 +378,47 @@ async function getAccessToken() {
     });
 }
 
-function logMessage(message, isError = false) {
-    const now = new Date().toISOString();
-    const messageWithTime = `[${now}] ${message}`;
+async function batch(tasks, batch_in_parallel) {
+    let len = tasks.length;
 
-    if (isError) console.error(messageWithTime);
-    else console.log(messageWithTime);
+    return new Promise((resolve, reject) => {
+        let counter = len;
+
+        function looper() {
+            if (tasks.length === 0) return;
+
+            // remove task from the front of the array:
+            // note: alternatively you can use .pop()
+            //       to process tasks from the back
+            tasks
+                .shift()()
+                .then(() => {
+                    counter--;
+                    if (counter) {
+                        // if we still have tasks
+                        looper(); // process another task
+                    } else {
+                        // if there are no tasks left we are
+                        // done so resolve the promise:
+                        resolve();
+                    }
+                });
+        }
+
+        // Start parallel tasks:
+        for (let i = 0; i < batch_in_parallel; i++) {
+            looper();
+        }
+    });
+}
+
+function logMessage(message, isError = false) {
+    if (isError) console.error(formatLogMessage(message));
+    else console.log(formatLogMessage(message));
+}
+
+function formatLogMessage(message) {
+    const now = new Date().toISOString();
+    const formattedMessage = `[${now}] ${message}`;
+    return formattedMessage;
 }
