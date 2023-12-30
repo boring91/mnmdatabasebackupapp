@@ -4,7 +4,6 @@ import fsSync from 'fs';
 import dotenv from 'dotenv';
 import prettyBytes from 'pretty-bytes';
 import cliProgress from 'cli-progress';
-import colors from 'ansi-colors';
 import { exit } from 'process';
 
 dotenv.config();
