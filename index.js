@@ -12,16 +12,16 @@ dotenv.config();
 const localDir = process.env.LOCAL_DIR;
 const remoteDir = process.env.REMOTE_DIR;
 const accessToken = await getAccessToken();
+const withBar = process.env.WITH_BAR ? true : false;
 
 await backupPendingFiles();
 // await upload('backupfile.txt');
 // await uploadWithProgressBar('backupfile.txt');
 // await multiUpload(['backupfile.txt', 'backupfile2.txt']);
-// await multiUploadWithProgressBar([
-//     'backupfile.txt',
-//     'backupfile2.txt',
-//     'backupfile3.txt',
-// ]);
+// await multiUploadWithProgressBar(
+//     ['backupfile.txt', 'backupfile2.txt', 'backupfile3.txt'],
+//     withBar
+// );
 
 async function backupPendingFiles() {
     logMessage(`Figuring out pending files...`);
@@ -115,32 +115,48 @@ async function getLocalBackupFiles() {
     }
 }
 
-async function multiUploadWithProgressBar(filenames) {
+async function multiUploadWithProgressBar(filenames, withBar = true) {
     // create new container
-    const multibar = new cliProgress.MultiBar(
-        {
-            clearOnComplete: false,
-            hideCursor: true,
-            format: ' {bar} | {filename} | {percentage}% | {valuePretty}/{totalPretty} | {speed}',
-        },
-        cliProgress.Presets.shades_grey
-    );
+    let multibar = null;
+
+    if (withBar) {
+        multibar = new cliProgress.MultiBar(
+            {
+                clearOnComplete: false,
+                hideCursor: true,
+                format: ' {bar} | {filename} | {percentage}% | {valuePretty}/{totalPretty} | {speed}',
+            },
+            cliProgress.Presets.shades_grey
+        );
+    }
 
     async function createPromise(filename) {
         const filePath = `${localDir}/${filename}`;
         const stats = await fs.stat(filePath);
         const size = stats.size;
-        const bar = multibar.create(size, 0, {
-            filename,
-            valuePretty: prettyBytes(0),
-            totalPretty: prettyBytes(size),
-            speed: prettyBytes(0) + '/s',
-        });
+
+        let bar = null;
+
+        if (withBar) {
+            bar = multibar.create(size, 0, {
+                filename,
+                valuePretty: prettyBytes(0),
+                totalPretty: prettyBytes(size),
+                speed: prettyBytes(0) + '/s',
+            });
+        } else {
+            logMessage(`Uploading ${filename}...`);
+        }
+
         await uploadWithProgressBar(filename, bar);
-        multibar.log(
-            formatLogMessage(`Finished uploading ${filename}.`) + '\n'
-        );
-        multibar.remove(bar);
+
+        const message = `Finished uploading ${filename}.`;
+        if (withBar) {
+            multibar.log(formatLogMessage(message) + '\n');
+            multibar.remove(bar);
+        } else {
+            logMessage(message);
+        }
     }
 
     const promiseGenerators = filenames.map(x => createPromise.bind(null, x));
@@ -148,31 +164,12 @@ async function multiUploadWithProgressBar(filenames) {
 
     await batch(promiseGenerators, maxConcurrentUploads);
 
-    multibar.stop();
+    if (withBar) {
+        multibar.stop();
+    }
 }
 
 async function uploadWithProgressBar(filename, bar = null) {
-    if (!bar) {
-        bar = new cliProgress.SingleBar({
-            format:
-                'Backup Progress |' +
-                colors.cyan('{bar}') +
-                '| {percentage}% || {valuePretty}/{totalPretty} || Speed: {speed}',
-            barCompleteChar: '\u2588',
-            barIncompleteChar: '\u2591',
-            hideCursor: true,
-        });
-
-        // initialize the bar - defining payload token "speed" with the default value "N/A"
-        const filePath = `${localDir}/${filename}`;
-        const size = (await fs.stat(filePath)).size;
-        bar.start(size, 0, {
-            speed: 'N/A',
-            valuePretty: '0 B',
-            totalPretty: prettyBytes(size),
-        });
-    }
-
     let startTime = new Date();
     let startOffset = 0;
     const onPreUpload = async offset => {
@@ -181,6 +178,8 @@ async function uploadWithProgressBar(filename, bar = null) {
     };
 
     const onPostUpload = async offset => {
+        if (!bar) return;
+
         // Compute speed
         const endTime = new Date();
         const elapsed = (endTime - startTime) / 1000;
@@ -195,8 +194,10 @@ async function uploadWithProgressBar(filename, bar = null) {
     };
 
     const onEnd = async () => {
-        // stop the bar
-        bar.stop();
+        if (bar) {
+            // stop the bar
+            bar.stop();
+        }
     };
 
     await upload(filename, {
@@ -204,11 +205,6 @@ async function uploadWithProgressBar(filename, bar = null) {
         onPostUpload,
         onEnd,
     });
-}
-
-async function multiUpload(filenames) {
-    const promiseGenerators = filenames.map(x => upload.bind(null, x));
-    await batch(promiseGenerators, 5);
 }
 
 async function upload(
