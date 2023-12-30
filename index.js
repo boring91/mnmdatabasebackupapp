@@ -43,7 +43,7 @@ async function backupPendingFiles() {
     //     await upload(pendingFile);
     // }
 
-    await multiUploadWithProgressBar(pendingFiles);
+    await multiUploadWithProgressBar(pendingFiles, withBar);
 
     logMessage('Done.');
 }
