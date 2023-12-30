@@ -244,7 +244,7 @@ async function upload(
                     let offset = 0;
 
                     const stream = fsSync.createReadStream(filePath, {
-                        highWaterMark: 5 * 1024 * 1024,
+                        highWaterMark: 20 * 1024 * 1024,
                     });
 
                     stream.on('data', async chunk => {
